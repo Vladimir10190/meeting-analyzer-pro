@@ -6,6 +6,9 @@ const cloudInput = document.querySelector('#cloud-url');
 const cloudAdd = document.querySelector('#cloud-add');
 const limits = document.querySelector('#video-limits');
 const hostingNote = document.querySelector('#hosting-note');
+const uploadPanel = document.querySelector('.upload');
+const guestInfo = document.querySelector('#guest-info');
+const ownerSignIn = document.querySelector('#owner-sign-in');
 const items = document.querySelector('#meetings');
 const empty = document.querySelector('#empty');
 const detail = document.querySelector('#detail');
@@ -25,6 +28,7 @@ let rendered = null;
 let busy = false;
 let pending = false;
 let advancing = false;
+let canManage = true;
 let configurationIssue = null;
 let message = '';
 let listVersion = '';
@@ -38,7 +42,7 @@ function create(tag, text = '', css = '') {
 }
 
 function updateUpload() {
-  const disabled = pending || busy || Boolean(configurationIssue);
+  const disabled = !canManage || pending || busy || Boolean(configurationIssue);
   pick.disabled = fileInput.disabled = cloudInput.disabled = cloudAdd.disabled = disabled;
   const retry = detail.querySelector('.retry');
   if (retry) retry.disabled = disabled;
@@ -159,6 +163,10 @@ async function refresh() {
   history = snapshot.meetings;
   busy = snapshot.busy;
   configurationIssue = snapshot.configuration_issue;
+  canManage = !snapshot.hosted || snapshot.can_manage === true;
+  uploadPanel.hidden = !canManage;
+  guestInfo.hidden = canManage;
+  ownerSignIn.hidden = snapshot.signed_in === true;
   if (snapshot.max_file_mib) limits.textContent = `MP4 или WebM · до 5 минут · до ${snapshot.max_file_mib} МиБ`;
   hostingNote.hidden = !snapshot.hosted;
   if (!active && history.length) active = history[0].id;
@@ -169,7 +177,7 @@ async function refresh() {
     await select(active);
   }
   const running = history.find(meeting => meeting.status === 'processing');
-  if (snapshot.hosted && running && !configurationIssue && !advancing) void advanceHosted(running.id);
+  if (snapshot.hosted && canManage && running && !configurationIssue && !advancing) void advanceHosted(running.id);
 }
 
 async function advanceHosted(id) {
@@ -184,7 +192,7 @@ async function advanceHosted(id) {
 }
 
 async function submit(route, options) {
-  if (pending || busy) return;
+  if (!canManage || pending || busy) return;
   pending = true;
   message = '';
   updateUpload();

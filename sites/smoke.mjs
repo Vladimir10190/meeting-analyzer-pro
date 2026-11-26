@@ -8,13 +8,14 @@ const video = await readFile(new URL('../test-data/01_project_meeting.mp4', impo
 const migration = await readFile(new URL('../drizzle/0000_meetings.sql', import.meta.url), 'utf8');
 const summary = { summary: 'Обсудили запуск.', decisions: [], tasks: [], open_questions: [] };
 
-test('Sites Worker stores stages, identifies repeats and isolates records by visitor', async t => {
+test('Sites Worker publishes ready summaries and reserves processing and transcripts for the owner', async t => {
   const sql = new DatabaseSync(':memory:');
   t.after(() => sql.close());
   sql.exec(migration);
   const videos = new Map();
   const env = {
     VSELLM_API_KEY: 'test-key',
+    MEETING_OWNER_ID: 'alice',
     DB: {
       prepare(query) {
         const statement = sql.prepare(query);
@@ -36,9 +37,10 @@ test('Sites Worker stores stages, identifies repeats and isolates records by vis
     },
   };
   const site = 'https://site.example';
-  const get = (path, owner = 'alice') => worker.fetch(new Request(site + path, { headers: { 'oai-authenticated-user-id': owner } }), env);
-  const post = (path, body, contentType) => worker.fetch(new Request(site + path, { method: 'POST', body,
-    headers: { 'oai-authenticated-user-id': 'alice', Origin: site, ...(contentType && { 'Content-Type': contentType }) } }), env);
+  const identity = visitor => visitor ? { 'oai-authenticated-user-id': visitor } : {};
+  const get = (path, visitor = 'alice') => worker.fetch(new Request(site + path, { headers: identity(visitor) }), env);
+  const post = (path, body, contentType, visitor = 'alice') => worker.fetch(new Request(site + path, { method: 'POST', body,
+    headers: { ...identity(visitor), Origin: site, ...(contentType && { 'Content-Type': contentType }) } }), env);
   const api = '/api/meetings';
   const link = 'https://drive.google.com/file/d/recording/view?usp=sharing';
   const add = () => post(`${api}/cloud`, JSON.stringify({ url: link }), 'application/json');
@@ -59,7 +61,11 @@ test('Sites Worker stores stages, identifies repeats and isolates records by vis
     return Response.json({ choices: [{ message: { content: JSON.stringify(summary) } }] });
   });
 
-  assert.equal((await worker.fetch(new Request(site + api), env)).status, 401);
+  const guestIndex = await (await get(api, null)).json();
+  assert.equal(guestIndex.can_manage, false);
+  assert.equal(guestIndex.signed_in, false);
+  assert.deepEqual(guestIndex.meetings, []);
+  assert.equal((await (await get(api)).json()).can_manage, true);
   assert.equal((await get('/')).status, 200);
   const rejectedOrigin = await worker.fetch(new Request(site + api, { method: 'POST',
     headers: { 'oai-authenticated-user-id': 'alice', Origin: 'https://untrusted.example' } }), env);
@@ -69,7 +75,10 @@ test('Sites Worker stores stages, identifies repeats and isolates records by vis
   const { id, stage } = await added.json();
   assert.equal(stage, 'download');
   assert.equal((await add()).status, 409);
+  assert.equal((await post(`${api}/cloud`, '{}', 'application/json', null)).status, 401);
+  assert.equal((await post(`${api}/${id}/advance`, undefined, undefined, 'bob')).status, 403);
   assert.equal((await get(`${api}/${id}`, 'bob')).status, 404);
+  assert.equal((await get(`${api}/${id}`, null)).status, 404);
   assert.deepEqual((await (await get(api, 'bob')).json()).meetings, []);
 
   assert.equal((await advance(id)).status, 200);
@@ -83,10 +92,20 @@ test('Sites Worker stores stages, identifies repeats and isolates records by vis
   assert.equal(videos.size, 0);
   assert.equal((await advance(id)).status, 200);
   assert.deepEqual((await detail(id)).summary, summary);
+  for (const viewer of [null, 'bob']) {
+    const index = await (await get(api, viewer)).json();
+    assert.deepEqual(index.meetings.map(meeting => meeting.id), [id]);
+    assert.equal(index.can_manage, false);
+    const shared = await (await get(`${api}/${id}`, viewer)).json();
+    assert.deepEqual(shared.summary, summary);
+    for (const key of ['transcript', 'error', 'checksum', 'cloud_url', 'owner']) assert.equal(key in shared, false);
+  }
+  assert.equal((await detail(id)).transcript, 'Текст встречи.');
 
   const duplicate = await (await add()).json();
   await advance(duplicate.id);
   assert.equal((await detail(duplicate.id)).duplicate_of, id);
+  assert.equal((await get(`${api}/${duplicate.id}`, null)).status, 404);
   assert.equal((await (await get(api)).json()).meetings.length, 1);
   assert.equal(transcriptions, 1);
 
