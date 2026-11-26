@@ -94,11 +94,11 @@ export async function inspectVideo(bytes, filename) {
   }
 }
 
-function meetingDetail(row, canManage) {
+function meetingDetail(row, canReadTranscript) {
   const { id, filename, created_at, source, status, stage, error, transcript, summary, duplicate_of } = row;
-  return { id, filename, created_at, source, status, stage,
+  return { id, filename, created_at, source, status, stage, error, duplicate_of,
     summary: summary ? JSON.parse(summary) : null,
-    ...(canManage && { error, transcript, duplicate_of }) };
+    ...(canReadTranscript && { transcript }) };
 }
 
 async function formFile(request) {
@@ -237,16 +237,16 @@ export default {
       }
       const visitor = request.headers.get('oai-authenticated-user-id');
       const owner = env.MEETING_OWNER_ID?.trim() || null;
-      const canManage = Boolean(owner && owner === visitor);
-      const config = canManage ? runtimeSettings(env) : null;
-      const issue = canManage ? runtimeIssue(config) : null;
+      const canReadTranscript = Boolean(owner && owner === visitor);
+      const config = runtimeSettings(env);
+      const issue = owner ? runtimeIssue(config) : 'Укажите MEETING_OWNER_ID в настройках сайта.';
+      const displayIssue = issue && (canReadTranscript ? issue : 'Добавление записей временно недоступно.');
       if (request.method === 'POST') {
-        if (!canManage) throw new HttpError(visitor ? 403 : 401, 'Добавлять и обрабатывать записи может владелец сайта.');
         const origin = request.headers.get('Origin');
         if ((origin && origin !== url.origin) || request.headers.get('Sec-Fetch-Site') === 'cross-site') {
           throw new HttpError(403, 'Загрузка доступна со страницы приложения.');
         }
-        if (issue) throw new HttpError(503, issue);
+        if (displayIssue) throw new HttpError(503, displayIssue);
         if (url.pathname === '/api/meetings' || url.pathname === '/api/meetings/cloud') {
           return await createMeeting(request, env, owner, url.pathname.endsWith('/cloud'));
         }
@@ -255,19 +255,15 @@ export default {
       }
       if (request.method === 'GET' && url.pathname === '/api/meetings') {
         const { results } = await env.DB.prepare(`SELECT id, filename, created_at, source, status, stage, summary FROM meetings
-          WHERE owner = ? AND status <> 'duplicate' AND (status = 'ready' OR ?) ORDER BY created_at DESC`)
-          .bind(owner, Number(canManage)).all();
+          WHERE owner = ? AND status <> 'duplicate' ORDER BY created_at DESC`).bind(owner).all();
         const meetings = results.map(({ summary, ...row }) => ({ ...row, preview: summary ? JSON.parse(summary).summary : undefined }));
         return reply({ meetings, busy: meetings.some(row => row.status === 'processing'),
-          configuration_issue: issue, hosted: true, max_file_mib: maxFileMiB,
-          can_manage: canManage, signed_in: Boolean(visitor) });
+          configuration_issue: displayIssue, hosted: true, max_file_mib: maxFileMiB, signed_in: Boolean(visitor) });
       }
       if (request.method === 'GET' && url.pathname.startsWith('/api/meetings/')) {
         const id = url.pathname.slice('/api/meetings/'.length);
-        const row = idPattern.test(id) && await env.DB.prepare(`SELECT * FROM meetings
-          WHERE id = ? AND owner = ? AND (status = 'ready' OR ?)`)
-          .bind(id, owner, Number(canManage)).first();
-        if (row) return reply(meetingDetail(row, canManage));
+        const row = idPattern.test(id) && await env.DB.prepare('SELECT * FROM meetings WHERE id = ? AND owner = ?').bind(id, owner).first();
+        if (row) return reply(meetingDetail(row, canReadTranscript));
       }
       throw new HttpError(404, 'Страница или встреча не найдена.');
     } catch (error) {

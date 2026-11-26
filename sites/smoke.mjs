@@ -8,7 +8,7 @@ const video = await readFile(new URL('../test-data/01_project_meeting.mp4', impo
 const migration = await readFile(new URL('../drizzle/0000_meetings.sql', import.meta.url), 'utf8');
 const summary = { summary: 'Обсудили запуск.', decisions: [], tasks: [], open_questions: [] };
 
-test('Sites Worker publishes ready summaries and reserves processing and transcripts for the owner', async t => {
+test('Guests can upload recordings, track processing and read the shared history', async t => {
   const sql = new DatabaseSync(':memory:');
   t.after(() => sql.close());
   sql.exec(migration);
@@ -38,14 +38,14 @@ test('Sites Worker publishes ready summaries and reserves processing and transcr
   };
   const site = 'https://site.example';
   const identity = visitor => visitor ? { 'oai-authenticated-user-id': visitor } : {};
-  const get = (path, visitor = 'alice') => worker.fetch(new Request(site + path, { headers: identity(visitor) }), env);
-  const post = (path, body, contentType, visitor = 'alice') => worker.fetch(new Request(site + path, { method: 'POST', body,
+  const get = (path, visitor) => worker.fetch(new Request(site + path, { headers: identity(visitor) }), env);
+  const post = (path, body, contentType, visitor) => worker.fetch(new Request(site + path, { method: 'POST', body,
     headers: { ...identity(visitor), Origin: site, ...(contentType && { 'Content-Type': contentType }) } }), env);
   const api = '/api/meetings';
   const link = 'https://drive.google.com/file/d/recording/view?usp=sharing';
   const add = () => post(`${api}/cloud`, JSON.stringify({ url: link }), 'application/json');
   const advance = id => post(`${api}/${id}/advance`);
-  const detail = async id => (await get(`${api}/${id}`)).json();
+  const detail = async (id, visitor) => (await get(`${api}/${id}`, visitor)).json();
   let transcriptions = 0;
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     if (url instanceof URL && url.hostname === 'drive.google.com') {
@@ -61,25 +61,22 @@ test('Sites Worker publishes ready summaries and reserves processing and transcr
     return Response.json({ choices: [{ message: { content: JSON.stringify(summary) } }] });
   });
 
-  const guestIndex = await (await get(api, null)).json();
-  assert.equal(guestIndex.can_manage, false);
+  const guestIndex = await (await get(api)).json();
   assert.equal(guestIndex.signed_in, false);
+  assert.equal(guestIndex.configuration_issue, null);
   assert.deepEqual(guestIndex.meetings, []);
-  assert.equal((await (await get(api)).json()).can_manage, true);
   assert.equal((await get('/')).status, 200);
   const rejectedOrigin = await worker.fetch(new Request(site + api, { method: 'POST',
-    headers: { 'oai-authenticated-user-id': 'alice', Origin: 'https://untrusted.example' } }), env);
+    headers: { Origin: 'https://untrusted.example' } }), env);
   assert.equal(rejectedOrigin.status, 403);
   const added = await add();
   assert.equal(added.status, 202);
   const { id, stage } = await added.json();
   assert.equal(stage, 'download');
   assert.equal((await add()).status, 409);
-  assert.equal((await post(`${api}/cloud`, '{}', 'application/json', null)).status, 401);
-  assert.equal((await post(`${api}/${id}/advance`, undefined, undefined, 'bob')).status, 403);
-  assert.equal((await get(`${api}/${id}`, 'bob')).status, 404);
-  assert.equal((await get(`${api}/${id}`, null)).status, 404);
-  assert.deepEqual((await (await get(api, 'bob')).json()).meetings, []);
+  assert.equal((await detail(id, 'bob')).stage, 'download');
+  assert.equal((await detail(id)).stage, 'download');
+  assert.deepEqual((await (await get(api, 'bob')).json()).meetings.map(meeting => meeting.id), [id]);
 
   assert.equal((await advance(id)).status, 200);
   assert.equal((await detail(id)).stage, 'transcription');
@@ -88,24 +85,24 @@ test('Sites Worker publishes ready summaries and reserves processing and transcr
   assert.equal((await advance(id)).status, 200);
   const recognized = await detail(id);
   assert.equal(recognized.stage, 'analysis');
-  assert.equal(recognized.transcript, 'Текст встречи.');
+  assert.equal('transcript' in recognized, false);
+  assert.equal((await detail(id, 'alice')).transcript, 'Текст встречи.');
   assert.equal(videos.size, 0);
   assert.equal((await advance(id)).status, 200);
   assert.deepEqual((await detail(id)).summary, summary);
   for (const viewer of [null, 'bob']) {
     const index = await (await get(api, viewer)).json();
     assert.deepEqual(index.meetings.map(meeting => meeting.id), [id]);
-    assert.equal(index.can_manage, false);
     const shared = await (await get(`${api}/${id}`, viewer)).json();
     assert.deepEqual(shared.summary, summary);
-    for (const key of ['transcript', 'error', 'checksum', 'cloud_url', 'owner']) assert.equal(key in shared, false);
+    for (const key of ['transcript', 'checksum', 'cloud_url', 'owner']) assert.equal(key in shared, false);
   }
-  assert.equal((await detail(id)).transcript, 'Текст встречи.');
+  assert.equal((await detail(id, 'alice')).transcript, 'Текст встречи.');
 
   const duplicate = await (await add()).json();
   await advance(duplicate.id);
   assert.equal((await detail(duplicate.id)).duplicate_of, id);
-  assert.equal((await get(`${api}/${duplicate.id}`, null)).status, 404);
+  assert.equal((await detail(duplicate.id)).status, 'duplicate');
   assert.equal((await (await get(api)).json()).meetings.length, 1);
   assert.equal(transcriptions, 1);
 
