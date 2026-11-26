@@ -175,7 +175,7 @@ function validateSummary(value) {
   return value;
 }
 
-export async function processVideo(videoPath) {
+export async function processVideo(videoPath, { onStage } = {}) {
   const config = settings();
   const issue = configurationIssue(config);
   if (issue) throw new ProcessingError(issue);
@@ -207,6 +207,7 @@ export async function processVideo(videoPath) {
     }
     if (!transcript) throw new ProcessingError('Сервис не распознал речь. Проверьте слышимость записи.');
 
+    await onStage?.('analysis');
     const completion = await request('/chat/completions', {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

@@ -3,23 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI-анализатор видеовстреч</title>
+  <title>AI-анализатор видеовстреч PRO</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <main>
     <header>
-      <h1>AI-анализатор видеовстреч</h1>
+      <h1>AI-анализатор видеовстреч PRO</h1>
       <p>Расшифровка и конспект из записи встречи.</p>
     </header>
     <section class="upload" aria-labelledby="upload-title">
       <div>
-        <h2 id="upload-title">Загрузить видео</h2>
-        <p>MP4 или WebM · 2–5 минут · до 250 МиБ</p>
+        <h2 id="upload-title">Анализ встреч</h2>
+        <p>MP4 или WebM · до 5 минут · до 250 МиБ</p>
       </div>
       <button type="button" id="choose" disabled>Выбрать файл</button>
       <input type="file" id="file" accept=".mp4,.webm,video/mp4,video/webm" hidden>
+      <form id="cloud-form" class="cloud-form">
+        <label for="cloud-url">Ссылка на видеозапись</label>
+        <div class="cloud-controls">
+          <input type="url" id="cloud-url" placeholder="https://…" required disabled maxlength="8192" aria-describedby="cloud-help">
+          <button type="submit" id="cloud-add" disabled>Добавить из облака</button>
+        </div>
+        <p id="cloud-help">Яндекс.Диск, Google Диск или Dropbox. Файл должен скачиваться без входа в аккаунт.</p>
+      </form>
       <p class="privacy">Для обработки видео и расшифровка передаются выбранному AI-провайдеру.</p>
       <p id="status" role="status" hidden></p>
       <p id="request-error" role="alert" hidden></p>

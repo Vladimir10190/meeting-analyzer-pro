@@ -1,12 +1,21 @@
 'use strict';
 const pick = document.querySelector('#choose');
 const fileInput = document.querySelector('#file');
+const cloudForm = document.querySelector('#cloud-form');
+const cloudInput = document.querySelector('#cloud-url');
+const cloudAdd = document.querySelector('#cloud-add');
 const items = document.querySelector('#meetings');
 const empty = document.querySelector('#empty');
 const detail = document.querySelector('#detail');
 const status = document.querySelector('#status');
 const alert = document.querySelector('#request-error');
-const labels = { processing: 'Обрабатывается', ready: 'Готово', error: 'Ошибка' };
+const labels = {
+  processing: 'Обрабатывается', download: 'Получение файла', transcription: 'Распознавание речи',
+  analysis: 'AI-анализ', ready: 'Готово', error: 'Ошибка', duplicate: 'Запись уже обработана',
+};
+const sourceLabel = source => source === 'cloud' ? 'Из облака' : 'Загружено вручную';
+const statusLabel = meeting => labels[meeting.stage ?? meeting.status];
+const recordKey = meeting => `${meeting.id}:${meeting.status}:${meeting.stage ?? ''}`;
 const formatter = new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' });
 let history = [];
 let active = null;
@@ -27,10 +36,11 @@ function create(tag, text = '', css = '') {
 
 function updateUpload() {
   const disabled = pending || busy || Boolean(configurationIssue);
-  pick.disabled = fileInput.disabled = disabled;
+  pick.disabled = fileInput.disabled = cloudInput.disabled = cloudAdd.disabled = disabled;
   const retry = detail.querySelector('.retry');
   if (retry) retry.disabled = disabled;
-  status.textContent = pending ? 'Загружается…' : busy ? 'Обрабатывается' : '';
+  const running = history.find(meeting => meeting.status === 'processing');
+  status.textContent = pending ? 'Добавляем запись…' : busy ? statusLabel(running ?? { status: 'processing' }) : '';
   status.hidden = !status.textContent;
   alert.textContent = message || configurationIssue || '';
   alert.hidden = !alert.textContent;
@@ -48,6 +58,14 @@ async function api(route, options) {
   return body;
 }
 
+function meetingMeta(meeting) {
+  const meta = create('span', '', 'meta');
+  const time = create('time', formatter.format(new Date(meeting.created_at)));
+  time.dateTime = meeting.created_at;
+  meta.append(time, create('span', sourceLabel(meeting.source)), create('span', statusLabel(meeting), meeting.status));
+  return meta;
+}
+
 function renderHistory() {
   const version = JSON.stringify([history, active]);
   if (version === listVersion) return;
@@ -59,11 +77,8 @@ function renderHistory() {
     const button = create('button', '', 'meeting');
     button.type = 'button';
     if (meeting.id === active) button.setAttribute('aria-current', 'true');
-    const meta = create('span', '', 'meta');
-    const time = create('time', formatter.format(new Date(meeting.created_at)));
-    time.dateTime = meeting.created_at;
-    meta.append(time, create('span', labels[meeting.status], meeting.status));
-    button.append(create('strong', meeting.filename), meta);
+    button.append(create('strong', meeting.filename), meetingMeta(meeting));
+    if (meeting.preview) button.append(create('span', meeting.preview, 'preview'));
     button.addEventListener('click', () => select(meeting.id));
     const item = create('li');
     item.append(button);
@@ -91,13 +106,19 @@ function appendList(parent, title, values, emptyText) {
 }
 
 function renderDetail(meeting) {
-  const key = meeting.id + meeting.status;
+  const key = recordKey(meeting);
   if (rendered === key) return;
   rendered = key;
   detail.hidden = false;
-  detail.replaceChildren(create('h2', meeting.filename), create('p', labels[meeting.status], meeting.status));
+  detail.replaceChildren(create('h2', meeting.filename), meetingMeta(meeting));
+  if (meeting.status === 'duplicate') {
+    const open = create('button', 'Открыть готовый результат', 'open-result');
+    open.type = 'button';
+    open.onclick = () => select(meeting.duplicate_of);
+    detail.append(open);
+  }
   if (meeting.error) {
-    const retry = create('button', 'Загрузить снова', 'retry');
+    const retry = create('button', meeting.source === 'cloud' ? 'Загрузить файл вручную' : 'Загрузить снова', 'retry');
     retry.type = 'button';
     retry.onclick = () => fileInput.click();
     detail.append(create('p', meeting.error, 'error'), retry);
@@ -139,21 +160,18 @@ async function refresh() {
   renderHistory();
   updateUpload();
   const selected = history.find(meeting => meeting.id === active);
-  if (selected && rendered !== selected.id + selected.status) await select(selected.id);
+  if (active && (selected ? rendered !== recordKey(selected) : rendered !== `${active}:duplicate:`)) {
+    await select(active);
+  }
 }
 
-pick.onclick = () => fileInput.click();
-fileInput.onchange = async () => {
-  const file = fileInput.files[0];
-  fileInput.value = '';
-  if (!file || pending || busy) return;
+async function submit(route, options) {
+  if (pending || busy) return;
   pending = true;
   message = '';
   updateUpload();
-  const form = new FormData();
-  form.set('file', file);
   try {
-    const result = await api('', { method: 'POST', body: form });
+    const result = await api(route, { method: 'POST', ...options });
     busy = true;
     await select(result.id);
     await refresh();
@@ -163,6 +181,24 @@ fileInput.onchange = async () => {
     pending = false;
     updateUpload();
   }
+}
+
+pick.onclick = () => fileInput.click();
+fileInput.onchange = () => {
+  const file = fileInput.files[0];
+  fileInput.value = '';
+  if (!file) return;
+  const form = new FormData();
+  form.set('file', file);
+  void submit('', { body: form });
+};
+
+cloudForm.onsubmit = event => {
+  event.preventDefault();
+  void submit('/cloud', {
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: cloudInput.value.trim() }),
+  });
 };
 
 async function poll() {
