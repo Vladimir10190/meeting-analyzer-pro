@@ -4,6 +4,8 @@ const fileInput = document.querySelector('#file');
 const cloudForm = document.querySelector('#cloud-form');
 const cloudInput = document.querySelector('#cloud-url');
 const cloudAdd = document.querySelector('#cloud-add');
+const limits = document.querySelector('#video-limits');
+const hostingNote = document.querySelector('#hosting-note');
 const items = document.querySelector('#meetings');
 const empty = document.querySelector('#empty');
 const detail = document.querySelector('#detail');
@@ -22,6 +24,7 @@ let active = null;
 let rendered = null;
 let busy = false;
 let pending = false;
+let advancing = false;
 let configurationIssue = null;
 let message = '';
 let listVersion = '';
@@ -156,12 +159,27 @@ async function refresh() {
   history = snapshot.meetings;
   busy = snapshot.busy;
   configurationIssue = snapshot.configuration_issue;
+  if (snapshot.max_file_mib) limits.textContent = `MP4 или WebM · до 5 минут · до ${snapshot.max_file_mib} МиБ`;
+  hostingNote.hidden = !snapshot.hosted;
   if (!active && history.length) active = history[0].id;
   renderHistory();
   updateUpload();
   const selected = history.find(meeting => meeting.id === active);
   if (active && (selected ? rendered !== recordKey(selected) : rendered !== `${active}:duplicate:`)) {
     await select(active);
+  }
+  const running = history.find(meeting => meeting.status === 'processing');
+  if (snapshot.hosted && running && !configurationIssue && !advancing) void advanceHosted(running.id);
+}
+
+async function advanceHosted(id) {
+  advancing = true;
+  try {
+    await api(`/${id}/advance`, { method: 'POST' });
+  } catch {
+    // The next poll retries after the server releases the stage lease.
+  } finally {
+    advancing = false;
   }
 }
 

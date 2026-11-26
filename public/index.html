@@ -16,7 +16,7 @@
     <section class="upload" aria-labelledby="upload-title">
       <div>
         <h2 id="upload-title">Анализ встреч</h2>
-        <p>MP4 или WebM · до 5 минут · до 250 МиБ</p>
+        <p id="video-limits">MP4 или WebM · до 5 минут · до 250 МиБ</p>
       </div>
       <button type="button" id="choose" disabled>Выбрать файл</button>
       <input type="file" id="file" accept=".mp4,.webm,video/mp4,video/webm" hidden>
@@ -29,6 +29,7 @@
         <p id="cloud-help">Яндекс.Диск, Google Диск или Dropbox. Файл должен скачиваться без входа в аккаунт.</p>
       </form>
       <p class="privacy">Для обработки видео и расшифровка передаются выбранному AI-провайдеру.</p>
+      <p class="privacy" id="hosting-note" hidden>Оставьте вкладку открытой до завершения обработки. После открытия сайта обработка возобновится с сохранённого этапа.</p>
       <p id="status" role="status" hidden></p>
       <p id="request-error" role="alert" hidden></p>
     </section>

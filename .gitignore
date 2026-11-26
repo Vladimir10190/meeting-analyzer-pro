@@ -2,6 +2,9 @@
 .env.local
 data/
 node_modules/
+dist/
+.wrangler/
+outputs/
 .tts-tools/
 .video-tools/
 .tts-check*.mp3
