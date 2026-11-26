@@ -94,11 +94,10 @@ export async function inspectVideo(bytes, filename) {
   }
 }
 
-function meetingDetail(row, canReadTranscript) {
+function meetingDetail(row) {
   const { id, filename, created_at, source, status, stage, error, transcript, summary, duplicate_of } = row;
-  return { id, filename, created_at, source, status, stage, error, duplicate_of,
-    summary: summary ? JSON.parse(summary) : null,
-    ...(canReadTranscript && { transcript }) };
+  return { id, filename, created_at, source, status, stage, error, duplicate_of, transcript,
+    summary: summary ? JSON.parse(summary) : null };
 }
 
 async function formFile(request) {
@@ -237,10 +236,10 @@ export default {
       }
       const visitor = request.headers.get('oai-authenticated-user-id');
       const owner = env.MEETING_OWNER_ID?.trim() || null;
-      const canReadTranscript = Boolean(owner && owner === visitor);
+      const isOwner = Boolean(owner && owner === visitor);
       const config = runtimeSettings(env);
       const issue = owner ? runtimeIssue(config) : 'Укажите MEETING_OWNER_ID в настройках сайта.';
-      const displayIssue = issue && (canReadTranscript ? issue : 'Добавление записей временно недоступно.');
+      const displayIssue = issue && (isOwner ? issue : 'Добавление записей временно недоступно.');
       if (request.method === 'POST') {
         const origin = request.headers.get('Origin');
         if ((origin && origin !== url.origin) || request.headers.get('Sec-Fetch-Site') === 'cross-site') {
@@ -263,7 +262,7 @@ export default {
       if (request.method === 'GET' && url.pathname.startsWith('/api/meetings/')) {
         const id = url.pathname.slice('/api/meetings/'.length);
         const row = idPattern.test(id) && await env.DB.prepare('SELECT * FROM meetings WHERE id = ? AND owner = ?').bind(id, owner).first();
-        if (row) return reply(meetingDetail(row, canReadTranscript));
+        if (row) return reply(meetingDetail(row));
       }
       throw new HttpError(404, 'Страница или встреча не найдена.');
     } catch (error) {

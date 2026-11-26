@@ -8,7 +8,7 @@ const video = await readFile(new URL('../test-data/01_project_meeting.mp4', impo
 const migration = await readFile(new URL('../drizzle/0000_meetings.sql', import.meta.url), 'utf8');
 const summary = { summary: 'Обсудили запуск.', decisions: [], tasks: [], open_questions: [] };
 
-test('Guests can upload recordings, track processing and read the shared history', async t => {
+test('Guests can upload recordings and read summaries and transcripts in the shared history', async t => {
   const sql = new DatabaseSync(':memory:');
   t.after(() => sql.close());
   sql.exec(migration);
@@ -85,8 +85,7 @@ test('Guests can upload recordings, track processing and read the shared history
   assert.equal((await advance(id)).status, 200);
   const recognized = await detail(id);
   assert.equal(recognized.stage, 'analysis');
-  assert.equal('transcript' in recognized, false);
-  assert.equal((await detail(id, 'alice')).transcript, 'Текст встречи.');
+  assert.equal(recognized.transcript, 'Текст встречи.');
   assert.equal(videos.size, 0);
   assert.equal((await advance(id)).status, 200);
   assert.deepEqual((await detail(id)).summary, summary);
@@ -95,7 +94,8 @@ test('Guests can upload recordings, track processing and read the shared history
     assert.deepEqual(index.meetings.map(meeting => meeting.id), [id]);
     const shared = await (await get(`${api}/${id}`, viewer)).json();
     assert.deepEqual(shared.summary, summary);
-    for (const key of ['transcript', 'checksum', 'cloud_url', 'owner']) assert.equal(key in shared, false);
+    assert.equal(shared.transcript, 'Текст встречи.');
+    for (const key of ['checksum', 'cloud_url', 'owner']) assert.equal(key in shared, false);
   }
   assert.equal((await detail(id, 'alice')).transcript, 'Текст встречи.');
 

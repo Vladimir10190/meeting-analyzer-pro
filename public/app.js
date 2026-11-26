@@ -7,7 +7,6 @@ const cloudAdd = document.querySelector('#cloud-add');
 const limits = document.querySelector('#video-limits');
 const hostingNote = document.querySelector('#hosting-note');
 const sharedHistory = document.querySelector('#shared-history');
-const ownerSignIn = document.querySelector('#owner-sign-in');
 const items = document.querySelector('#meetings');
 const empty = document.querySelector('#empty');
 const detail = document.querySelector('#detail');
@@ -162,7 +161,6 @@ async function refresh() {
   busy = snapshot.busy;
   configurationIssue = snapshot.configuration_issue;
   sharedHistory.hidden = !snapshot.hosted;
-  ownerSignIn.hidden = snapshot.signed_in === true;
   if (snapshot.max_file_mib) limits.textContent = `MP4 или WebM · до 5 минут · до ${snapshot.max_file_mib} МиБ`;
   hostingNote.hidden = !snapshot.hosted;
   if (!active && history.length) active = history[0].id;
