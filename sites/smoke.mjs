@@ -6,12 +6,14 @@ import worker from '../dist/server/index.js';
 
 const video = await readFile(new URL('../test-data/01_project_meeting.mp4', import.meta.url));
 const migration = await readFile(new URL('../drizzle/0000_meetings.sql', import.meta.url), 'utf8');
+const sourceMigration = await readFile(new URL('../drizzle/0001_source_url.sql', import.meta.url), 'utf8');
 const summary = { summary: 'Обсудили запуск.', decisions: [], tasks: [], open_questions: [] };
 
 test('Guests can upload recordings and read summaries and transcripts in the shared history', async t => {
   const sql = new DatabaseSync(':memory:');
   t.after(() => sql.close());
   sql.exec(migration);
+  sql.exec(sourceMigration);
   const videos = new Map();
   const env = {
     VSELLM_API_KEY: 'test-key',
@@ -76,6 +78,7 @@ test('Guests can upload recordings and read summaries and transcripts in the sha
   assert.equal((await add()).status, 409);
   assert.equal((await detail(id, 'bob')).stage, 'download');
   assert.equal((await detail(id)).stage, 'download');
+  assert.equal((await detail(id)).source_url, link);
   assert.deepEqual((await (await get(api, 'bob')).json()).meetings.map(meeting => meeting.id), [id]);
 
   assert.equal((await advance(id)).status, 200);
@@ -89,20 +92,25 @@ test('Guests can upload recordings and read summaries and transcripts in the sha
   assert.equal(videos.size, 0);
   assert.equal((await advance(id)).status, 200);
   assert.deepEqual((await detail(id)).summary, summary);
+  assert.equal((await detail(id)).source_url, link);
   for (const viewer of [null, 'bob']) {
     const index = await (await get(api, viewer)).json();
     assert.deepEqual(index.meetings.map(meeting => meeting.id), [id]);
+    assert.equal(index.meetings[0].source_url, link);
     const shared = await (await get(`${api}/${id}`, viewer)).json();
     assert.deepEqual(shared.summary, summary);
     assert.equal(shared.transcript, 'Текст встречи.');
+    assert.equal(shared.source_url, link);
     for (const key of ['checksum', 'cloud_url', 'owner']) assert.equal(key in shared, false);
   }
   assert.equal((await detail(id, 'alice')).transcript, 'Текст встречи.');
 
+  sql.prepare('UPDATE meetings SET source_url = NULL WHERE id = ?').run(id);
   const duplicate = await (await add()).json();
   await advance(duplicate.id);
   assert.equal((await detail(duplicate.id)).duplicate_of, id);
   assert.equal((await detail(duplicate.id)).status, 'duplicate');
+  assert.equal((await detail(id)).source_url, link);
   assert.equal((await (await get(api)).json()).meetings.length, 1);
   assert.equal(transcriptions, 1);
 
@@ -115,6 +123,7 @@ test('Guests can upload recordings and read summaries and transcripts in the sha
   await advance(manualId);
   assert.equal((await detail(manualId)).status, 'ready');
   assert.equal((await detail(manualId)).source, 'manual');
+  assert.equal((await detail(manualId)).source_url, null);
   assert.equal(videos.size, 0);
   assert.equal(transcriptions, 2);
 });

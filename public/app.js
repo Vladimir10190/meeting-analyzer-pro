@@ -18,11 +18,12 @@ const labels = {
 };
 const sourceLabel = source => source === 'cloud' ? 'Из облака' : 'Загружено вручную';
 const statusLabel = meeting => labels[meeting.stage ?? meeting.status];
-const recordKey = meeting => `${meeting.id}:${meeting.status}:${meeting.stage ?? ''}`;
+const recordKey = meeting => JSON.stringify([meeting.id, meeting.status, meeting.stage ?? '', meeting.source_url ?? null]);
 const formatter = new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' });
 let history = [];
 let active = null;
 let rendered = null;
+let renderedDuplicate = null;
 let busy = false;
 let pending = false;
 let advancing = false;
@@ -83,6 +84,7 @@ function renderHistory() {
     if (meeting.id === active) button.setAttribute('aria-current', 'true');
     button.append(create('strong', meeting.filename), meetingMeta(meeting));
     if (meeting.preview) button.append(create('span', meeting.preview, 'preview'));
+    if (meeting.source_url) button.append(create('span', 'Источник: ' + meeting.source_url, 'source-url'));
     button.addEventListener('click', () => select(meeting.id));
     const item = create('li');
     item.append(button);
@@ -113,6 +115,7 @@ function renderDetail(meeting) {
   const key = recordKey(meeting);
   if (rendered === key) return;
   rendered = key;
+  renderedDuplicate = meeting.status === 'duplicate' ? meeting.id : null;
   detail.hidden = false;
   detail.replaceChildren(create('h2', meeting.filename), meetingMeta(meeting));
   if (meeting.status === 'duplicate') {
@@ -131,6 +134,23 @@ function renderDetail(meeting) {
     const report = section('Конспект', true);
     const { summary, decisions, tasks, open_questions: openQuestions } = meeting.summary;
     report.append(create('h3', 'Краткое содержание'), create('p', summary));
+    if (meeting.source_url) {
+      const source = create('p', '', 'source-url');
+      source.append(create('strong', 'Исходное видео: '));
+      try {
+        const url = new URL(meeting.source_url);
+        if (url.protocol === 'https:') {
+          const link = create('a', meeting.source_url);
+          link.href = url.href;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          source.append(link);
+        } else source.append(document.createTextNode(meeting.source_url));
+      } catch {
+        source.append(document.createTextNode(meeting.source_url));
+      }
+      report.append(source);
+    }
     appendList(report, 'Решения', decisions, 'Решений нет.');
     appendList(report, 'Задачи', tasks.map(({ action, assignee, due }) =>
       [action, assignee ? 'Исполнитель — ' + assignee : 'Исполнитель не указан',
@@ -167,7 +187,7 @@ async function refresh() {
   renderHistory();
   updateUpload();
   const selected = history.find(meeting => meeting.id === active);
-  if (active && (selected ? rendered !== recordKey(selected) : rendered !== `${active}:duplicate:`)) {
+  if (active && (selected ? rendered !== recordKey(selected) : renderedDuplicate !== active)) {
     await select(active);
   }
   const running = history.find(meeting => meeting.status === 'processing');

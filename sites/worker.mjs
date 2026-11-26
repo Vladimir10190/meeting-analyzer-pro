@@ -95,8 +95,8 @@ export async function inspectVideo(bytes, filename) {
 }
 
 function meetingDetail(row) {
-  const { id, filename, created_at, source, status, stage, error, transcript, summary, duplicate_of } = row;
-  return { id, filename, created_at, source, status, stage, error, duplicate_of, transcript,
+  const { id, filename, created_at, source, source_url, status, stage, error, transcript, summary, duplicate_of } = row;
+  return { id, filename, created_at, source, source_url, status, stage, error, duplicate_of, transcript,
     summary: summary ? JSON.parse(summary) : null };
 }
 
@@ -127,7 +127,7 @@ async function readLink(request) {
   let url;
   try { url = JSON.parse(new TextDecoder().decode(body))?.url; }
   catch { throw new HttpError(400, 'Не удалось прочитать ссылку.'); }
-  return cloudLink(url);
+  return { link: cloudLink(url), sourceUrl: url.trim() };
 }
 
 async function deleteVideo(bucket, id) {
@@ -141,9 +141,10 @@ async function createMeeting(request, env, owner, fromCloud) {
   const source = fromCloud ? 'cloud' : 'manual';
   const stage = fromCloud ? 'download' : 'transcription';
   let link;
+  let sourceUrl;
   let filename;
   if (fromCloud) {
-    link = await readLink(request);
+    ({ link, sourceUrl } = await readLink(request));
     filename = cloudFilename(link).slice(0, 240);
   } else {
     const upload = await formFile(request);
@@ -151,9 +152,9 @@ async function createMeeting(request, env, owner, fromCloud) {
     await env.BUCKET.put(id, upload.file);
   }
   try {
-    const inserted = await env.DB.prepare(`INSERT INTO meetings (id, owner, source, filename, created_at, status, stage, cloud_url)
-      VALUES (?, ?, ?, ?, ?, 'processing', ?, ?) ON CONFLICT DO NOTHING`).bind(
-      id, owner, source, filename, new Date().toISOString(), stage, link?.url.href ?? null,
+    const inserted = await env.DB.prepare(`INSERT INTO meetings (id, owner, source, filename, created_at, status, stage, cloud_url, source_url)
+      VALUES (?, ?, ?, ?, ?, 'processing', ?, ?, ?) ON CONFLICT DO NOTHING`).bind(
+      id, owner, source, filename, new Date().toISOString(), stage, link?.url.href ?? null, sourceUrl ?? null,
     ).run();
     if (!inserted.meta.changes) throw new HttpError(409, busyMessage);
   } catch (error) {
@@ -174,6 +175,8 @@ async function download(row, env, update) {
   const existing = await env.DB.prepare(`SELECT id FROM meetings WHERE owner = ? AND checksum = ?
     AND source = 'cloud' AND status = 'ready' LIMIT 1`).bind(row.owner, checksum).first();
   if (existing) {
+    await env.DB.prepare('UPDATE meetings SET source_url = ? WHERE id = ? AND owner = ? AND source_url IS NULL')
+      .bind(row.source_url, existing.id, row.owner).run();
     await update("filename = ?, status = 'duplicate', duplicate_of = ?, stage = NULL, cloud_url = NULL", filename, existing.id);
     await deleteVideo(env.BUCKET, row.id);
     return;
@@ -253,7 +256,7 @@ export default {
         if (advanceId && idPattern.test(advanceId)) return await advance(env, owner, advanceId, config);
       }
       if (request.method === 'GET' && url.pathname === '/api/meetings') {
-        const { results } = await env.DB.prepare(`SELECT id, filename, created_at, source, status, stage, summary FROM meetings
+        const { results } = await env.DB.prepare(`SELECT id, filename, created_at, source, source_url, status, stage, summary FROM meetings
           WHERE owner = ? AND status <> 'duplicate' ORDER BY created_at DESC`).bind(owner).all();
         const meetings = results.map(({ summary, ...row }) => ({ ...row, preview: summary ? JSON.parse(summary).summary : undefined }));
         return reply({ meetings, busy: meetings.some(row => row.status === 'processing'),

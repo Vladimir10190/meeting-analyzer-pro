@@ -190,6 +190,7 @@ test('cloud import uses the Lite pipeline, persists stages, and recognizes dupli
     analysis.resolve();
     const ready = await finished(server, id);
     assert.equal(ready.source, 'cloud');
+    assert.equal(ready.source_url, link);
     assert.equal(ready.status, 'ready');
     assert.deepEqual(ready.summary, example.summary);
     assert.equal(ready.checksum, undefined);
@@ -203,6 +204,7 @@ test('cloud import uses the Lite pipeline, persists stages, and recognizes dupli
     assert.equal(reused.status, 'duplicate');
     assert.equal(reused.duplicate_of, id);
     const { meetings } = await (await request(server, '/api/meetings')).json();
+    assert.equal(meetings[0].source_url, link);
     assert.deepEqual(meetings.map(meeting => [meeting.id, meeting.preview]), [[id, example.summary.summary]]);
     assert.deepEqual(await readdir(join(dataDirectory, 'meetings')), [id + '.json']);
     assert.equal(transcriptions, 1);

@@ -99,7 +99,7 @@ async function readCloudLink(request) {
   }
   try {
     const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    return cloudLink(data?.url);
+    return { link: cloudLink(data?.url), sourceUrl: data.url.trim() };
   } catch (error) {
     throw new HttpError(400, error instanceof CloudImportError ? error.message : 'Не удалось прочитать ссылку.');
   }
@@ -160,6 +160,9 @@ export async function createMeetingServer({
         const candidates = [...meetings.values()].filter(item => item.status === 'ready' && item.checksum === checksum);
         const existing = candidates.find(item => item.cloud_link_key === record.cloud_link_key) ?? candidates[0];
         if (existing) {
+          if (!existing.source_url && record.source_url) {
+            await save({ ...existing, source_url: record.source_url });
+          }
           await rm(recordPath(record.id));
           duplicates.set(record.id, { ...publicRecord(record), filename, status: 'duplicate', stage: null, duplicate_of: existing.id });
           meetings.delete(record.id);
@@ -205,8 +208,10 @@ export async function createMeetingServer({
       let record;
       let link;
       if (fromCloud) {
-        link = await readCloudLink(request);
+        const cloud = await readCloudLink(request);
+        link = cloud.link;
         record = newRecord('cloud', cloudFilename(link).slice(0, 240), 'download');
+        record.source_url = cloud.sourceUrl;
         record.cloud_link_key = createHash('sha256').update(link.url.href).digest('hex');
         video = join(temporary, record.id + '.download');
       } else {
@@ -245,8 +250,8 @@ export async function createMeetingServer({
       }
       if (request.method === 'GET' && pathname === '/api/meetings') {
         const items = [...meetings.values()].sort((a, b) => b.created_at.localeCompare(a.created_at))
-          .map(({ id, filename, created_at, status, stage, source = 'manual', summary }) =>
-            ({ id, filename, created_at, status, stage, source, preview: summary?.summary }));
+            .map(({ id, filename, created_at, status, stage, source = 'manual', source_url, summary }) =>
+            ({ id, filename, created_at, status, stage, source, source_url, preview: summary?.summary }));
         return reply(response, 200, { meetings: items, configuration_issue: unavailable(), busy });
       }
       if (request.method === 'GET' && pathname.startsWith('/api/meetings/')) {
